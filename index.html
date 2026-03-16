@@ -118,6 +118,22 @@
             render();
         }
 
+        function dismissRecord(gIdx, rId) {
+            // Eliminar el registro del array de registros del grupo
+            groups[gIdx].records = groups[gIdx].records.filter(r => r.id !== rId);
+            
+            // Si el grupo se queda con 1 o menos registros, ya no es un grupo de duplicados
+            if (groups[gIdx].records.length < 2) {
+                groups.splice(gIdx, 1);
+            } else {
+                // Si borramos el master actual, ponemos el primero que queda como nuevo master
+                if (groups[gIdx].masterId === rId) {
+                    groups[gIdx].masterId = groups[gIdx].records[0].id;
+                }
+            }
+            render();
+        }
+
         async function markGroup(gIdx) {
             const group = groups[gIdx];
             if (group.isProcessed) return alert("This group is already processed!");
@@ -177,6 +193,7 @@
                                 `).join('')}
                                 <div style="display:flex; gap:5px; justify-content: flex-end;">
                                     ${!isCurrentMaster && !group.isProcessed ? `<button class="btn btn-secondary" onclick="setMaster(${gIdx}, '${rec.id}')">Set as Master</button>` : ''}
+                                    ${!group.isProcessed ? `<button class="btn btn-secondary" style="color:var(--error)" onclick="dismissRecord(${gIdx}, '${rec.id}')" title="Not a Duplicate">✕</button>` : ''}
                                     <a href="/duplicado/${rec.id}" class="btn btn-primary">Solo</a>
                                 </div>
                             </div>
