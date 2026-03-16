@@ -1,0 +1,45 @@
+Analiza el texto/guion proporcionado y extrae información valiosa para mejorar mi contenido. Por favor, proporciona un JSON con los siguientes elementos:
+
+1. Dolores de la audiencia: Describe los miedos, frustraciones, obstáculos o creencias que se mencionan o se aluden en el texto (máximo 5 puntos).
+2. Preguntas relevantes: Identifica hasta 5 preguntas comunes que mi audiencia podría tener en relación con el contenido del texto.
+3. Momentos de impacto: Selecciona hasta 3 frases o partes del texto que podrían causar un fuerte impacto o identificación en mi audiencia.
+4. Ideas de contenido relacionadas: Sugiere hasta 5 ideas de contenido nuevas o ángulos que se puedan desarrollar a partir del texto.
+
+5. Clasificación de la sesión:
+   - tipo_llamada: clasifica en "venta" | "consultoria" | "soporte" | "onboarding" | "seguimiento" | "estrategia" | "contenido" | "otro"
+   - subtipo: descripción corta de qué fue concretamente (ej: "cierre propuesta nocode", "soporte técnico n8n", "grabación de clase")
+   - energia_general: "alta" | "media" | "baja" según el tono y disposición general del texto
+   - nombre_persona: nombre del interlocutor principal si se menciona, si no null
+   - empresa_o_rubro: empresa o industria si se menciona, si no null
+
+6. Solo si es una llamada de venta (tipo_llamada = "venta"):
+   - paquete_discutido: qué servicio o precio se habló
+   - estado_cierre: "cerrado" | "no_cerrado" | "seguimiento"
+   - objeciones: lista de objeciones que surgieron
+   - razon_principal: qué lo convenció (si cerró) o cuál fue el bloqueador real (si no cerró)
+   - proximos_pasos: qué quedó acordado al final
+
+{{ $('Extract from File').item.json.data }}
+
+Formato de respuesta: JSON con los siguientes elementos:
+
+{
+  "dolores": [],
+  "preguntas": [],
+  "momentos_de_impacto": [],
+  "ideas_de_contenido": [],
+  "clasificacion": {
+    "tipo_llamada": "",
+    "subtipo": "",
+    "energia_general": "",
+    "nombre_persona": null,
+    "empresa_o_rubro": null
+  },
+  "venta": {
+    "paquete_discutido": null,
+    "estado_cierre": null,
+    "objeciones": [],
+    "razon_principal": null,
+    "proximos_pasos": null
+  }
+}
