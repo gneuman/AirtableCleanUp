@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Master Comparison View</title>
+    <style>
+        body { font-family: system-ui; background: #f8fafc; padding: 2rem; color: #1e293b; margin: 0; }
+        .comparison-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; }
+        .card { background: white; padding: 1.5rem; border-radius: 12px; border: 1px solid #e2e8f0; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); }
+        .master-card { border-left: 6px solid #22c55e; position: sticky; top: 2rem; }
+        .match-card { margin-bottom: 2rem; border-left: 6px solid #ef4444; }
+        .field { margin-bottom: 0.8rem; border-bottom: 1px solid #f1f5f9; padding-bottom: 0.4rem; }
+        .field-label { font-size: 0.7rem; font-weight: bold; color: #64748b; text-transform: uppercase; }
+        .field-value { font-size: 1rem; font-weight: 500; }
+        .diff { color: #ef4444; font-weight: 800; text-decoration: underline; background: #fef2f2; padding: 2px 4px; border-radius: 4px; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; }
+        .badge { background: #f1f5f9; padding: 0.3rem 0.6rem; border-radius: 6px; font-size: 0.75rem; font-weight: bold; margin-bottom: 1rem; display: inline-block; }
+        .btn { background: #2563eb; color: white; padding: 0.6rem 1.2rem; border-radius: 6px; text-decoration: none; font-weight: bold; border: none; cursor: pointer; }
+        .btn-success { background: #22c55e; }
+        .btn-success:hover { background: #16a34a; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Detailed Universal Comparison</h1>
+        <div>
+            <button id="markBtn" class="btn btn-success" style="display:none;" onclick="markAllAsDuplicates()">Mark All as Duplicates & Link</button>
+            <a href="/" class="btn" style="background: #64748b;">Back</a>
+        </div>
+    </div>
+    
+    <div id="loader" style="text-align:center; padding: 5rem;"><h2>Analyzing matches...</h2></div>
+    <div id="container" class="comparison-grid" style="display:none;">
+        <div id="master-panel"></div>
+        <div id="matches-panel"></div>
+    </div>
+
+    <script>
+        let currentData = null;
+
+        async function loadComparison() {
+            const masterId = window.location.pathname.split('/').pop();
+            const config = {
+                apiKey: localStorage.getItem('clean_apiKey'),
+                baseId: localStorage.getItem('clean_baseId'),
+                tableName: localStorage.getItem('clean_tableName'),
+                fieldsToCompare: localStorage.getItem('clean_fieldsToCompare'),
+                masterId
+            };
+
+            try {
+                const res = await fetch('/api/compare', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(config)
+                });
+                currentData = await res.json();
+                render(currentData);
+                if (currentData.matches.length > 0) {
+                    document.getElementById('markBtn').style.display = 'inline-block';
+                }
+            } catch (e) {
+                alert("Error: " + e.message);
+            }
+        }
+
+        async function markAllAsDuplicates() {
+            if (!confirm(`Are you sure you want to mark ${currentData.matches.length} records as duplicates and link them to this Master?`)) return;
+
+            const config = {
+                apiKey: localStorage.getItem('clean_apiKey'),
+                baseId: localStorage.getItem('clean_baseId'),
+                tableName: localStorage.getItem('clean_tableName'),
+                masterId: currentData.master.id,
+                copyIds: currentData.matches.map(m => m.id),
+                checkboxField: localStorage.getItem('clean_checkboxField'),
+                linkField: localStorage.getItem('clean_linkField')
+            };
+
+            if (!config.checkboxField || !config.linkField) {
+                alert("Please configure Checkbox and Link field names in the main dashboard settings.");
+                return;
+            }
+
+            const btn = document.getElementById('markBtn');
+            btn.disabled = true;
+            btn.innerText = "Updating Airtable...";
+
+            try {
+                const res = await fetch('/api/mark-duplicates', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(config)
+                });
+                const result = await res.json();
+                if (result.success) {
+                    alert(`Successfully marked ${result.updatedCount} records!`);
+                    window.location.reload();
+                } else {
+                    throw new Error(result.error);
+                }
+            } catch (e) {
+                alert("Update failed: " + e.message);
+                btn.disabled = false;
+                btn.innerText = "Mark All as Duplicates & Link";
+            }
+        }
+
+        function render(data) {
+            document.getElementById('loader').style.display = 'none';
+            document.getElementById('container').style.display = 'grid';
+            
+            const { master, matches, fields } = data;
+            
+            // Render Master
+            document.getElementById('master-panel').innerHTML = `
+                <div class="card master-card">
+                    <span class="badge">MASTER RECORD: ${master.id}</span>
+                    ${fields.map(f => `
+                        <div class="field">
+                            <div class="field-label">${f}</div>
+                            <div class="field-value">${master.fields[f] || '-'}</div>
+                        </div>
+                    `).join('')}
+                    <hr>
+                    <a href="https://airtable.com/${localStorage.getItem('clean_baseId')}/${localStorage.getItem('clean_tableName')}/viw/${master.id}" target="_blank" class="btn" style="background:#22c55e; display:block; text-align:center;">Open in Airtable</a>
+                </div>
+            `;
+
+            // Render Matches
+            document.getElementById('matches-panel').innerHTML = `
+                <h2 style="margin-top:0;">Similar Records found (${matches.length})</h2>
+                ${matches.map(m => `
+                    <div class="card match-card">
+                        <span class="badge">MATCH ID: ${m.id}</span>
+                        ${fields.map(f => {
+                            const isDiff = m.fields[f] !== master.fields[f];
+                            return `
+                                <div class="field">
+                                    <div class="field-label">${f}</div>
+                                    <div class="field-value ${isDiff ? 'diff' : ''}">${m.fields[f] || '-'}</div>
+                                </div>
+                            `;
+                        }).join('')}
+                        <a href="https://airtable.com/${localStorage.getItem('clean_baseId')}/${localStorage.getItem('clean_tableName')}/viw/${m.id}" target="_blank" class="btn" style="background:#ef4444; display:block; text-align:center;">Open in Airtable</a>
+                    </div>
+                `).join('') || '<div class="card">No matches found.</div>'}
+            `;
+        }
+        loadComparison();
+    </script>
+</body>
+</html>

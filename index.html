@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Universal Airtable CleanUp</title>
+    <style>
+        :root {
+            --primary: #2563eb; --bg: #f8fafc; --card-bg: #ffffff;
+            --text: #1e293b; --border: #e2e8f0; --error: #ef4444;
+            --success: #22c55e; --accent: #f59e0b;
+        }
+
+        body { font-family: system-ui; background: var(--bg); color: var(--text); margin: 0; display: flex; height: 100vh; }
+        .sidebar { width: 320px; background: white; border-right: 1px solid var(--border); padding: 1.5rem; display: flex; flex-direction: column; gap: 1rem; overflow-y: auto; }
+        .main-content { flex: 1; padding: 2rem; overflow-y: auto; }
+        .form-group { display: flex; flex-direction: column; gap: 0.3rem; }
+        label { font-size: 0.7rem; font-weight: bold; text-transform: uppercase; color: #64748b; }
+        input { padding: 0.5rem; border: 1px solid var(--border); border-radius: 4px; font-size: 0.85rem; }
+
+        .btn { padding: 0.5rem 0.8rem; border-radius: 4px; border: none; cursor: pointer; font-weight: bold; font-size: 0.8rem; transition: 0.2s; }
+        .btn-primary { background: var(--primary); color: white; }
+        .btn-secondary { background: #f1f5f9; color: #1e293b; border: 1px solid var(--border); }
+        .btn-success { background: var(--success); color: white; }
+        .btn-success:hover { background: #16a34a; }
+        .btn-disabled { background: #e2e8f0; color: #94a3b8; cursor: not-allowed; }
+
+        .group-card { background: white; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 2rem; }
+        .group-card.is-processed { border: 2px solid var(--success); opacity: 0.8; }
+        .group-header { padding: 0.8rem 1rem; border-bottom: 1px solid var(--border); background: #f8fafc; display: flex; justify-content: space-between; align-items: center; }
+        .group-title { font-weight: bold; color: var(--primary); }
+
+        .record-row { display: grid; gap: 1rem; padding: 0.8rem 1rem; border-bottom: 1px solid #f1f5f9; align-items: center; }
+        .record-row.is-master { background: #f0fdf4; border-left: 4px solid var(--success); }
+        .record-row.already-marked { background: #f8fafc; }
+
+        .badge { padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.65rem; font-weight: bold; }
+        .badge-master { background: #dcfce7; color: #166534; }
+        .badge-processed { background: #dcfce7; color: #166534; text-transform: uppercase; }
+
+        .field-box { display: flex; flex-direction: column; min-width: 0; }
+        .field-label { font-size: 0.6rem; color: #94a3b8; text-transform: uppercase; }
+        .field-val { font-size: 0.85rem; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+        .loading-overlay { position: fixed; inset: 0; background: rgba(255,255,255,0.8); display: none; place-items: center; z-index: 1000; flex-direction: column; }
+    </style>
+</head>
+<body>
+    <div class="sidebar">
+        <h3>Settings</h3>
+        <div class="form-group"><label>API Key</label><input type="password" id="apiKey"></div>
+        <div class="form-group"><label>Base ID</label><input type="text" id="baseId"></div>
+        <div class="form-group"><label>Table Name</label><input type="text" id="tableName"></div>
+        <div class="form-group"><label>Compare Fields</label><input type="text" id="fieldsToCompare"></div>
+        <div class="form-group"><label>Checkbox Field</label><input type="text" id="checkboxField"></div>
+        <div class="form-group"><label>Link Field</label><input type="text" id="linkField"></div>
+        <div style="display:flex; align-items:center; gap:10px;">
+            <input type="checkbox" id="onlyUnprocessed" style="width:auto;"> 
+            <label style="margin:0;">Only Unprocessed Records</label>
+        </div>
+        <button class="btn btn-primary" onclick="startScan()">Universal Scan</button>
+        <hr>
+        <div id="global-actions" style="display:none;">
+            <button class="btn btn-success" onclick="markAllDetectedGroups()">Mark ALL Unprocessed</button>
+        </div>
+        <hr>
+        <div style="font-size: 0.75rem; text-align: center; color: #94a3b8; margin-top: auto; padding-top: 1rem;">
+            Created by <br> 
+            <a href="https://gabrielneuman.com" target="_blank" style="color: var(--primary); text-decoration: none; font-weight: bold;">Gabriel Neuman</a>
+        </div>
+    </div>
+
+    <div class="main-content">
+        <h1 id="stats">Dashboard</h1>
+        <div id="results"></div>
+    </div>
+
+    <div id="loader" class="loading-overlay"><h2 id="loader-title">Thinking...</h2><div id="loader-progress"></div></div>
+
+    <script>
+        let groups = [];
+        const keys = ['apiKey', 'baseId', 'tableName', 'fieldsToCompare', 'checkboxField', 'linkField', 'onlyUnprocessed'];
+        
+        // Cargar config de localStorage
+        keys.forEach(k => {
+            const el = document.getElementById(k);
+            if (el.type === 'checkbox') {
+                el.checked = localStorage.getItem('clean_'+k) === 'true';
+            } else {
+                el.value = localStorage.getItem('clean_'+k) || '';
+            }
+        });
+
+        async function startScan() {
+            const config = {};
+            keys.forEach(k => { 
+                const el = document.getElementById(k);
+                const val = el.type === 'checkbox' ? el.checked.toString() : el.value;
+                config[k] = val; 
+                localStorage.setItem('clean_'+k, val); 
+            });
+            
+            document.getElementById('loader').style.display = 'flex';
+            try {
+                const res = await fetch('/api/scan', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(config) });
+                groups = await res.json();
+                // Por defecto, el primero de cada grupo es master
+                groups.forEach(g => { g.masterId = g.records[0].id; });
+                render();
+                document.getElementById('stats').innerText = `${groups.length} Groups Found`;
+                document.getElementById('global-actions').style.display = 'block';
+            } catch (e) { alert(e.message); }
+            document.getElementById('loader').style.display = 'none';
+        }
+
+        function setMaster(gIdx, rId) {
+            groups[gIdx].masterId = rId;
+            render();
+        }
+
+        async function markGroup(gIdx) {
+            const group = groups[gIdx];
+            if (group.isProcessed) return alert("This group is already processed!");
+            
+            const copyIds = group.records.filter(r => r.id !== group.masterId).map(r => r.id);
+            const config = {
+                apiKey: document.getElementById('apiKey').value,
+                baseId: document.getElementById('baseId').value,
+                tableName: document.getElementById('tableName').value,
+                checkboxField: document.getElementById('checkboxField').value,
+                linkField: document.getElementById('linkField').value,
+                masterId: group.masterId,
+                copyIds
+            };
+
+            try {
+                const res = await fetch('/api/mark-duplicates', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(config) });
+                const result = await res.json();
+                if (result.success) {
+                    group.isProcessed = true;
+                    render();
+                    alert("Master updated and linked successfully!");
+                }
+            } catch (e) { alert(e.message); }
+        }
+
+        function render() {
+            const fields = document.getElementById('fieldsToCompare').value.split(',').map(f => f.trim());
+            const container = document.getElementById('results');
+            
+            container.innerHTML = groups.map((group, gIdx) => `
+                <div class="group-card ${group.isProcessed ? 'is-processed' : ''}">
+                    <div class="group-header">
+                        <div>
+                            <span class="group-title">GROUP #${gIdx + 1}</span>
+                            ${group.isProcessed ? '<span class="badge badge-processed">PROCESSED</span>' : ''}
+                        </div>
+                        <button class="btn ${group.isProcessed ? 'btn-disabled' : 'btn-success'}" 
+                                onclick="markGroup(${gIdx})" ${group.isProcessed ? 'disabled' : ''}>
+                                ${group.isProcessed ? 'Done' : 'Confirm Master & Link Duplicates'}
+                        </button>
+                    </div>
+                    ${group.records.map(rec => {
+                        const isCurrentMaster = rec.id === group.masterId;
+                        return `
+                        <div class="record-row ${isCurrentMaster ? 'is-master' : ''}">
+                            <div style="grid-template-columns: 100px repeat(${fields.length}, 1fr) 180px; display: grid; gap: 1rem; align-items: center;">
+                                <div>
+                                    ${isCurrentMaster ? '<span class="badge badge-master">MASTER</span>' : ''}
+                                    <div style="font-size:0.6rem; color:#94a3b8; margin-top:5px;">${rec.id}</div>
+                                </div>
+                                ${fields.map(f => `
+                                    <div class="field-box">
+                                        <label>${f}</label>
+                                        <span class="field-val" title="${rec.fields[f] || '-'}">${rec.fields[f] || '-'}</span>
+                                    </div>
+                                `).join('')}
+                                <div style="display:flex; gap:5px; justify-content: flex-end;">
+                                    ${!isCurrentMaster && !group.isProcessed ? `<button class="btn btn-secondary" onclick="setMaster(${gIdx}, '${rec.id}')">Set as Master</button>` : ''}
+                                    <a href="/duplicado/${rec.id}" class="btn btn-primary">Solo</a>
+                                </div>
+                            </div>
+                        </div>
+                        `;
+                    }).join('')}
+                </div>
+            `).join('');
+        }
+
+        async function markAllDetectedGroups() {
+            const unprocessed = groups.filter(g => !g.isProcessed);
+            if (!confirm(`Mark ${unprocessed.length} groups automatically?`)) return;
+            
+            const loader = document.getElementById('loader');
+            loader.style.display = 'flex';
+            const prog = document.getElementById('loader-progress');
+            
+            for (let i = 0; i < unprocessed.length; i++) {
+                prog.innerText = `Processing ${i+1}/${unprocessed.length}...`;
+                const gIdx = groups.indexOf(unprocessed[i]);
+                await markGroup(gIdx);
+            }
+            loader.style.display = 'none';
+            alert("All unprocessed groups have been marked.");
+        }
+    </script>
+</body>
+</html>

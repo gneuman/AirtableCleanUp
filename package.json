@@ -1,0 +1,20 @@
+{
+  "name": "airtablecleanup",
+  "version": "1.0.0",
+  "description": "Universal Airtable Duplicate Cleaner & Automator",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "airtable": "^0.12.2",
+    "chalk": "^5.6.2",
+    "dotenv": "^17.3.1",
+    "express": "^5.2.1"
+  }
+}
