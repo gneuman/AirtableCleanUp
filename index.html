@@ -131,6 +131,12 @@
 
     <div class="main-content">
         <h1 id="stats" style="margin-top:0;">Dashboard</h1>
+        <div id="search-bar" style="display:none; margin-bottom:1.5rem;">
+            <input type="text" id="searchInput" placeholder="🔎 Buscar en grupos por campos seleccionados..."
+                   oninput="renderFiltered()"
+                   style="width:100%; padding:0.6rem 1rem; font-size:0.9rem; border:1px solid var(--border); border-radius:6px; box-sizing:border-box;">
+            <div id="search-info" style="font-size:0.75rem; color:#94a3b8; margin-top:0.4rem;"></div>
+        </div>
         <div id="results"></div>
     </div>
 
@@ -318,6 +324,9 @@
 
                 groups = data;
                 groups.forEach(g => { g.masterId = g.records[0].id; });
+                document.getElementById('searchInput').value = '';
+                document.getElementById('search-info').textContent = '';
+                document.getElementById('search-bar').style.display = groups.length ? 'block' : 'none';
                 render();
                 document.getElementById('stats').innerText = `${groups.length} Duplicate Groups Found`;
                 document.getElementById('global-actions').style.display = groups.length ? 'block' : 'none';
@@ -390,7 +399,26 @@
         }
 
         // ── Render ─────────────────────────────────────────────────────────────
-        function render() {
+        function renderFiltered() {
+            const term = document.getElementById('searchInput').value.trim().toLowerCase();
+            const compareFields = getSelectedCompareFields();
+
+            const filtered = !term ? groups : groups.filter(group =>
+                group.records.some(rec =>
+                    compareFields.some(f => {
+                        const val = formatFieldValue(rec.fields[f]).toLowerCase();
+                        return val.includes(term);
+                    })
+                )
+            );
+
+            const info = document.getElementById('search-info');
+            info.textContent = term ? `${filtered.length} de ${groups.length} grupos` : '';
+
+            render(filtered);
+        }
+
+        function render(data = groups) {
             // Campos a mostrar: todos los del schema de la tabla (si está disponible),
             // o bien todos los campos que aparecen en los registros del primer grupo
             let displayFields;
@@ -405,8 +433,9 @@
             }
 
             const container = document.getElementById('results');
-            container.innerHTML = groups.map((group, gIdx) => `
-                <div class="group-card ${group.isProcessed ? 'is-processed' : ''}">
+            container.innerHTML = data.map((group) => {
+                const gIdx = groups.indexOf(group); // índice real para que markGroup/dismiss funcionen
+                return `<div class="group-card ${group.isProcessed ? 'is-processed' : ''}">
                     <div class="group-header">
                         <div>
                             <span class="group-title">GROUP #${gIdx + 1}</span>
@@ -452,7 +481,8 @@
                         </table>
                     </div>
                 </div>
-            `).join('');
+                `;
+            }).join('');
         }
 
         // ── Helpers ────────────────────────────────────────────────────────────
