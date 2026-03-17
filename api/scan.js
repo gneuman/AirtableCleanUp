@@ -25,8 +25,7 @@ module.exports = async (req, res) => {
 
   try {
     const records = [];
-    // SIEMPRE descargamos todo para poder comparar registros nuevos contra viejos
-    // Pero si 'onlyUnprocessed' es true, usaremos esto luego para filtrar qué GRUPOS mostrar
+    // Descargamos todo para poder comparar registros nuevos contra viejos
     await base(tableName).select({}).eachPage((pageRecords, fetchNextPage) => {
       records.push(...pageRecords);
       fetchNextPage();
@@ -39,11 +38,16 @@ module.exports = async (req, res) => {
       const masterCandidate = records[i];
       if (visited.has(masterCandidate.id)) continue;
 
+      const masterNorms = fields.map(f => ({ 
+        name: f.toLowerCase(), 
+        val: smartNormalize(masterCandidate.get(f), f) 
+      }));
+
       const groupRecords = [masterCandidate];
-        const masterNorms = fields.map(f => ({ 
-          name: f.toLowerCase(), 
-          val: smartNormalize(masterCandidate.get(f), f) 
-        }));
+
+      for (let j = i + 1; j < records.length; j++) {
+        const candidate = records[j];
+        if (visited.has(candidate.id)) continue;
 
         const candidateNorms = fields.map(f => ({ 
           name: f.toLowerCase(), 
@@ -60,18 +64,18 @@ module.exports = async (req, res) => {
         }
 
         // 2. Verificar si hay CONFLICTO en campos críticos
-        // Si tienen valores distintos en Email o LinkedIn, NO son duplicados
         let hasConflict = false;
-        for (let idx = 0; idx < fields.length; idx++) {
-          const fieldName = masterNorms[idx].name;
-          const mVal = masterNorms[idx].val;
-          const cVal = candidateNorms[idx].val;
+        if (hasMatch) {
+          for (let idx = 0; idx < fields.length; idx++) {
+            const fieldName = masterNorms[idx].name;
+            const mVal = masterNorms[idx].val;
+            const cVal = candidateNorms[idx].val;
 
-          if (mVal !== '' && cVal !== '' && mVal !== cVal) {
-            // Si el campo es Email, LinkedIn o Teléfono, un valor distinto es un conflicto total
-            if (fieldName.includes('email') || fieldName.includes('linkedin') || fieldName.includes('phone') || fieldName.includes('mobile')) {
-              hasConflict = true;
-              break;
+            if (mVal !== '' && cVal !== '' && mVal !== cVal) {
+              if (fieldName.includes('email') || fieldName.includes('linkedin') || fieldName.includes('phone') || fieldName.includes('mobile')) {
+                hasConflict = true;
+                break;
+              }
             }
           }
         }
@@ -80,6 +84,7 @@ module.exports = async (req, res) => {
           groupRecords.push(candidate);
           visited.add(candidate.id);
         }
+      }
 
       if (groupRecords.length > 1) {
         visited.add(masterCandidate.id);

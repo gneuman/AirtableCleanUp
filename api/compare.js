@@ -2,13 +2,20 @@ const Airtable = require('airtable');
 
 function smartNormalize(value, fieldName = '') {
   if (!value) return '';
-  let str = String(value).trim().toLowerCase();
+  // Eliminar acentos y diacríticos, pasar a minúsculas y limpiar espacios
+  let str = String(value)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
+
   if (fieldName.toLowerCase().includes('website') || fieldName.toLowerCase().includes('url')) {
     str = str.replace(/^(https?:\/\/)?(www\.)?/, '').replace(/\/$/, '');
   } else {
-    str = str.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, "").replace(/\s{2,}/g, " ");
+    // Mantener solo letras y números para comparaciones de texto/nombres
+    str = str.replace(/[^a-z0-9]/g, "");
   }
-  return str.trim();
+  return str;
 }
 
 module.exports = async (req, res) => {
@@ -18,7 +25,10 @@ module.exports = async (req, res) => {
 
   try {
     const masterRecord = await base(tableName).find(masterId);
-    const masterNorms = fields.map(f => smartNormalize(masterRecord.get(f), f));
+    const masterNorms = fields.map(f => ({
+      name: f.toLowerCase(),
+      val: smartNormalize(masterRecord.get(f), f)
+    }));
 
     const allRecords = [];
     await base(tableName).select({}).eachPage((records, fetchNextPage) => {
@@ -30,11 +40,31 @@ module.exports = async (req, res) => {
       if (rec.id === masterId) return false;
       const candidateNorms = fields.map(f => smartNormalize(rec.get(f), f));
       
-      // Coincide en CUALQUIERA de los campos especificados
-      return masterNorms.some((mVal, idx) => {
+      // 1. Verificar COINCIDENCIA
+      let hasMatch = false;
+      for (let idx = 0; idx < fields.length; idx++) {
         const cVal = candidateNorms[idx];
-        return mVal !== '' && cVal !== '' && mVal === cVal;
-      });
+        if (masterNorms[idx].val !== '' && masterNorms[idx].val === cVal) {
+          hasMatch = true;
+          break;
+        }
+      }
+      if (!hasMatch) return false;
+
+      // 2. Verificar CONFLICTO
+      for (let idx = 0; idx < fields.length; idx++) {
+        const fieldName = masterNorms[idx].name;
+        const mVal = masterNorms[idx].val;
+        const cVal = candidateNorms[idx].val;
+
+        if (mVal !== '' && cVal !== '' && mVal !== cVal) {
+          if (fieldName.includes('email') || fieldName.includes('linkedin') || fieldName.includes('phone') || fieldName.includes('mobile')) {
+            return false; // Conflicto detectado
+          }
+        }
+      }
+
+      return true;
     });
 
     return res.status(200).json({
