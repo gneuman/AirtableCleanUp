@@ -2,7 +2,6 @@ const Airtable = require('airtable');
 
 function smartNormalize(value, fieldName = '') {
   if (!value) return '';
-  // Eliminar acentos y diacríticos, pasar a minúsculas y limpiar espacios
   let str = String(value)
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -12,20 +11,18 @@ function smartNormalize(value, fieldName = '') {
   if (fieldName.toLowerCase().includes('website') || fieldName.toLowerCase().includes('url')) {
     str = str.replace(/^(https?:\/\/)?(www\.)?/, '').replace(/\/$/, '');
   } else {
-    // Mantener solo letras y números para comparaciones de texto/nombres
     str = str.replace(/[^a-z0-9]/g, "");
   }
   return str;
 }
 
 module.exports = async (req, res) => {
-  const { apiKey, baseId, tableName, fieldsToCompare, checkboxField, onlyUnprocessed } = req.body;
+  const { apiKey, baseId, tableName, fieldsToCompare, checkboxField, linkField, onlyUnprocessed } = req.body;
   const fields = fieldsToCompare.split(',').map(f => f.trim());
   const base = new Airtable({ apiKey }).base(baseId);
 
   try {
     const records = [];
-    // Descargamos todo para poder comparar registros nuevos contra viejos
     await base(tableName).select({}).eachPage((pageRecords, fetchNextPage) => {
       records.push(...pageRecords);
       fetchNextPage();
@@ -54,7 +51,7 @@ module.exports = async (req, res) => {
           val: smartNormalize(candidate.get(f), f) 
         }));
         
-        // 1. Verificar si hay COINCIDENCIA en al menos un campo
+        // 1. Verificar COINCIDENCIA
         let hasMatch = false;
         for (let idx = 0; idx < fields.length; idx++) {
           if (masterNorms[idx].val !== '' && masterNorms[idx].val === candidateNorms[idx].val) {
@@ -63,7 +60,7 @@ module.exports = async (req, res) => {
           }
         }
 
-        // 2. Verificar si hay CONFLICTO en campos críticos
+        // 2. Verificar CONFLICTO (Email/LinkedIn/Phone)
         let hasConflict = false;
         if (hasMatch) {
           for (let idx = 0; idx < fields.length; idx++) {
@@ -72,7 +69,7 @@ module.exports = async (req, res) => {
             const cVal = candidateNorms[idx].val;
 
             if (mVal !== '' && cVal !== '' && mVal !== cVal) {
-              if (fieldName.includes('email') || fieldName.includes('linkedin') || fieldName.includes('phone') || fieldName.includes('mobile')) {
+              if (fieldName.includes('email') || fieldName.includes('linkedin') || fieldName.includes('phone')) {
                 hasConflict = true;
                 break;
               }
@@ -89,17 +86,36 @@ module.exports = async (req, res) => {
       if (groupRecords.length > 1) {
         visited.add(masterCandidate.id);
         
-        const hasUnprocessed = groupRecords.some(r => !r.get(checkboxField));
-        const isAnyProcessed = groupRecords.some(r => r.get(checkboxField) === true);
+        // DETECCIÓN PROGRAMÁTICA DE PROCESADOS:
+        // Un grupo está procesado si:
+        // a) El checkboxField está marcado en TODOS los registros (menos quizás el master)
+        // b) O si ya existe un enlace en linkField entre ellos
+        
+        const hasUnprocessedCheckbox = groupRecords.some(r => !r.get(checkboxField));
+        
+        // Revisar si ya están enlazados mediante el campo linkField
+        let alreadyLinked = false;
+        if (linkField) {
+            const masterLinks = masterCandidate.get(linkField) || [];
+            const masterLinksIds = Array.isArray(masterLinks) ? masterLinks : [masterLinks];
+            
+            // Si el master ya apunta a alguno de los otros en el grupo, lo consideramos vinculado
+            alreadyLinked = groupRecords.some(r => {
+                if (r.id === masterCandidate.id) return false;
+                return masterLinksIds.includes(r.id);
+            });
+        }
 
-        // Si el usuario pidió solo pendientes, solo mostramos el grupo si tiene al menos uno sin procesar
-        if (onlyUnprocessed === 'true' && !hasUnprocessed) {
+        const isProcessed = !hasUnprocessedCheckbox || alreadyLinked;
+
+        // Si el usuario pidió solo pendientes, ocultamos los ya procesados/enlazados
+        if (onlyUnprocessed === 'true' && isProcessed) {
           continue;
         }
 
         groups.push({
           key: "Potential Duplicate Group",
-          isProcessed: isAnyProcessed && !hasUnprocessed,
+          isProcessed: isProcessed,
           records: groupRecords.map(r => ({ 
             id: r.id, 
             fields: r.fields,
